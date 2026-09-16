@@ -1,0 +1,61 @@
+name: Publish technical status
+run-name: status-${{ inputs.asset_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: collector-status-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Download and validate sanitized payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ASSET_ID: ${{ inputs.asset_id }}
+          EXPECTED_SHA: ${{ inputs.sha256 }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,io,json,os,pathlib,re,urllib.request,zipfile
+          asset=os.environ['ASSET_ID']; expected=os.environ['EXPECTED_SHA']
+          assert re.fullmatch(r'[0-9]+',asset) and re.fullmatch(r'[a-f0-9]{64}',expected)
+          url='https://api.github.com/repos/'+os.environ['REPOSITORY']+'/releases/assets/'+asset
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','User-Agent':'structural-status-pages'})
+          with urllib.request.urlopen(req,timeout=30) as r: meta=json.load(r)
+          target=meta['browser_download_url']
+          assert target.startswith('https://github.com/'+os.environ['REPOSITORY']+'/releases/download/')
+          with urllib.request.urlopen(target,timeout=60) as r: blob=r.read(20_000_001)
+          assert len(blob)<=20_000_000 and hashlib.sha256(blob).hexdigest()==expected
+          z=zipfile.ZipFile(io.BytesIO(blob)); names=z.namelist()
+          assert sorted(names)==['index.html','latest.png','status.json']
+          assert sum(i.file_size for i in z.infolist())<20_000_000
+          status=json.loads(z.read('status.json'))
+          assert status['schema']=='STRUCTURAL_VISUAL_AUDITOR_V1' and status['qa_only'] is True
+          assert hashlib.sha256(z.read('latest.png')).hexdigest()==status['qa']['image_sha256']
+          pathlib.Path('site').mkdir()
+          for name in names:pathlib.Path('site',name).write_bytes(z.read(name))
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          retention-days: 1
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
