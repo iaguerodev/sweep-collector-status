@@ -24,6 +24,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - name: Download and validate sanitized payload
         env:
@@ -50,8 +51,10 @@ jobs:
           assert status['schema']=='STRUCTURAL_VISUAL_AUDITOR_V1' and status['qa_only'] is True
           assert hashlib.sha256(z.read('latest.png')).hexdigest()==status['qa']['image_sha256']
           pathlib.Path('site').mkdir()
-          for name in names:pathlib.Path('site',name).write_bytes(z.read(name))
+          for name in ['latest.png','status.json']:pathlib.Path('site',name).write_bytes(z.read(name))
           PY
+      - name: Use repository-controlled cohort-aware viewer
+        run: cp index.html site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
