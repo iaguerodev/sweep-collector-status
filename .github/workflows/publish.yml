@@ -35,6 +35,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import hashlib,io,json,os,pathlib,re,urllib.request,zipfile
+          from provenance17 import validate_status
           asset=os.environ['ASSET_ID']; expected=os.environ['EXPECTED_SHA']
           assert re.fullmatch(r'[0-9]+',asset) and re.fullmatch(r'[a-f0-9]{64}',expected)
           url='https://api.github.com/repos/'+os.environ['REPOSITORY']+'/releases/assets/'+asset
@@ -45,13 +46,14 @@ jobs:
           with urllib.request.urlopen(target,timeout=60) as r: blob=r.read(20_000_001)
           assert len(blob)<=20_000_000 and hashlib.sha256(blob).hexdigest()==expected
           z=zipfile.ZipFile(io.BytesIO(blob)); names=z.namelist()
-          assert sorted(names)==['index.html','latest.png','status.json']
+          assert sorted(names)==['index.html','status.json']
           assert sum(i.file_size for i in z.infolist())<20_000_000
           status=json.loads(z.read('status.json'))
           assert status['schema']=='STRUCTURAL_VISUAL_AUDITOR_V1' and status['qa_only'] is True
-          assert hashlib.sha256(z.read('latest.png')).hexdigest()==status['qa']['image_sha256']
+          validate_status(status)
+          assert z.read('index.html')==pathlib.Path('index.html').read_bytes()
           pathlib.Path('site').mkdir()
-          for name in ['latest.png','status.json']:pathlib.Path('site',name).write_bytes(z.read(name))
+          pathlib.Path('site/status.json').write_bytes(z.read('status.json'))
           PY
       - name: Use repository-controlled cohort-aware viewer
         run: cp index.html site/index.html
